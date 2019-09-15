@@ -219,6 +219,7 @@ def model_WFH(stat_a_level, load_tables, load_features):
     
     '''
     # Load table 59 (the one with commute mechanism) and have a quick look at the distribution of WFH by sex
+    response_vector = 'WFH_Participation'
     df_travel = load_table_refined('G59', ['Number of Commuting Methods'], statistical_area_code=stat_a_level)
     cols_to_delete = [x for x in df_travel.columns if 'Worked_at_home' not in x]
     df_travel.drop(cols_to_delete,axis=1, inplace=True)
@@ -230,8 +231,8 @@ def model_WFH(stat_a_level, load_tables, load_features):
     
     # Create new "Work From Home Participation Rate" vector to ensure consistency across regions
     # Base this off population who worked from home divided by total population in the region
-    df_travel['WFH_Participaction'] = (df_travel['Method of Travel to Work by Sex|Worked_at_home']/
-                                       df_travel['Tot_P_P'])
+    df_travel[response_vector] = (df_travel['Method of Travel to Work by Sex|Worked_at_home']/
+                                  df_travel['Tot_P_P'])
     # Drop the original absolute values column
     df_travel = df_travel.drop(['Method of Travel to Work by Sex|Worked_at_home'], axis=1)
     
@@ -258,16 +259,21 @@ def model_WFH(stat_a_level, load_tables, load_features):
             input_vectors[cols] = input_vectors[cols]/input_vectors['Tot_P_P']
 
     # merge and drop na values from the response vector
-    df_travel = df_travel.merge(input_vectors, left_index=True, right_index=True)
-    df_travel = df_travel.dropna(subset=['WFH_Participaction'])
+    df_travel = df_travel.merge(input_vectors, how='left', left_index=True, right_index=True)
+    df_travel = df_travel.dropna(subset=[response_vector])
 
     df_travel = df_travel.drop([x for x in df_travel.columns if 'Tot_P_P' in x], axis=1)
 
+    # drop outliers based on the WFHPR column
+    # choosing to remove columns based on IQR formula
+    # only use an upper bound for outlier detection in this case, based on 3-sigma variation 
+    #drop_cutoff = (((df_travel[response_vector].quantile(0.75)-df_travel[response_vector].quantile(0.25))*1.5)
+    #               +df_travel[response_vector].quantile(0.75))
+    drop_cutoff = df_travel[response_vector].mean() + (3* df_travel[response_vector].std())
+    df_travel = df_travel[df_travel[response_vector] <= drop_cutoff]
+    
     # Remove duplicate column values
     df_travel = df_travel.T.drop_duplicates().T
-
-    # Investigate correlations to check out items which stand out as potential drivers
-    response_vector = 'WFH_Participaction'
 
     # Create X & y
     X = df_travel.drop(response_vector, axis=1)
