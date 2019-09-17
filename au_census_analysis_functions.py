@@ -169,7 +169,7 @@ def load_tables_specify_cats(table_list, category_list, statistical_area_code='S
 
 
 
-def build_model():
+def build_model(verbosity = 3):
     ''' 
     Builds a Gridsearch object for use in supervised learning modelling.
     Imputes for missing values and build a model to complete a quick Gridsearch over RandomForestRegressor key parameters.
@@ -192,16 +192,16 @@ def build_model():
 
     # create grid search object
     scorer = make_scorer(r2_score)
-    cv = GridSearchCV(pipeline_model, param_grid=parameters, scoring=scorer, verbose = 3)
+    cv = GridSearchCV(pipeline_model, param_grid=parameters, scoring=scorer, verbose = verbosity, cv=3)
 
     return cv
 
-
-def model_WFH(stat_a_level, load_tables, load_features):
+def WFH_create_Xy(stat_a_level, load_tables, load_features):
     '''
-    A function which compiles a set of background information from defined ABS census tables and trains a 
-    Random Forest Regression model (including cleaning and gridsearch functions) to predict the "Work from home
-    participation rate" in a given region.
+    A function which compiles a set of background information from defined ABS census tables and 
+    creates input and output vectors to allow model training for the  "Work from home participation 
+    rate" in a given region. Cleans the data for outliers (defined as >3 standard deviations from the mean) in the
+    WFH participation rate, and scales all data by dividing by the "Total Population" feature for each region.
     
     INPUTS
     stat_a_level - String. The statistical area level of information the data should be drawn from (SA1-3)
@@ -209,13 +209,9 @@ def model_WFH(stat_a_level, load_tables, load_features):
     load_features - List of Strings. A list of population characteristics to use in analysis (Age, Sex, labor force status, etc.)
     
     OUTPUTS
-    grid_fit.best_estimator_ - SKLearn Pipeline object. The best grid-fit model in training the data.
-    X_train - Pandas dataframe. The training dataset used in fitting the model.
-    X_test - Pandas dataframe. A testing dataset for use in analysing model performance.
-    y_train - Pandas dataframe. The training dataset for the response vector (WFH participation)
-                used in fitting the model.
-    y_test - Pandas dataframe. A testing dataset for the response vector (WFH participation)
-                for use in analysing model performance.
+    X - pandas DataFrame - a dataframe of features from the census datapacks tables, normalised by dividing each feature by 
+                            the population attributable to the region
+    y - pandas series - the Work from Home Participation Rate by region
     
     '''
     # Load table 59 (the one with commute mechanism) and have a quick look at the distribution of WFH by sex
@@ -265,8 +261,8 @@ def model_WFH(stat_a_level, load_tables, load_features):
     df_travel = df_travel.drop([x for x in df_travel.columns if 'Tot_P_P' in x], axis=1)
 
     # drop outliers based on the WFHPR column
-    # choosing to remove columns based on IQR formula
     # only use an upper bound for outlier detection in this case, based on 3-sigma variation 
+    # had previously chosen to remove columns based on IQR formula, but given the skew in the data this was not effective
     #drop_cutoff = (((df_travel[response_vector].quantile(0.75)-df_travel[response_vector].quantile(0.25))*1.5)
     #               +df_travel[response_vector].quantile(0.75))
     drop_cutoff = df_travel[response_vector].mean() + (3* df_travel[response_vector].std())
@@ -278,6 +274,35 @@ def model_WFH(stat_a_level, load_tables, load_features):
     # Create X & y
     X = df_travel.drop(response_vector, axis=1)
     y = df_travel[response_vector]
+
+    # Get the estimator
+    return X, y
+
+
+def model_WFH(stat_a_level, load_tables, load_features):
+    '''
+    A function which compiles a set of background information from defined ABS census tables and trains a 
+    Random Forest Regression model (including cleaning and gridsearch functions) to predict the "Work from home
+    participation rate" in a given region.
+    
+    INPUTS
+    stat_a_level - String. The statistical area level of information the data should be drawn from (SA1-3)
+    load_tables - List of Strings. A list of ABS census datapack tables to draw data from (G01-59)
+    load_features - List of Strings. A list of population characteristics to use in analysis (Age, Sex, labor force status, etc.)
+    
+    OUTPUTS
+    grid_fit.best_estimator_ - SKLearn Pipeline object. The best grid-fit model in training the data.
+    X_train - Pandas dataframe. The training dataset used in fitting the model.
+    X_test - Pandas dataframe. A testing dataset for use in analysing model performance.
+    y_train - Pandas dataframe. The training dataset for the response vector (WFH participation)
+                used in fitting the model.
+    y_test - Pandas dataframe. A testing dataset for the response vector (WFH participation)
+                for use in analysing model performance.
+    
+    '''
+    
+    # Create X & y
+    X, y = WFH_create_Xy(stat_a_level, load_tables, load_features)
 
     # Split the 'features' and 'response' vectors into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2, random_state = 42)
@@ -337,7 +362,7 @@ def feature_plot_h(model, X_train, n_features):
     plt.show()  
 
     
-def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None):
+def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None, consistent_X=False):
     '''
     Takes a trained model and training dataset and synthesises the impacts of the top n features
     to show their relationship to the response vector (i.e. how a change in the feature changes
@@ -348,7 +373,11 @@ def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None):
     X_train = Pandas Dataframe object. Feature set the training was completed using.
     n_features = Int. Top n features you would like to plot.
     y_label = String. Description of response variable for axis labelling.
-    pipeline = Optional. If the sklearn model was compiled using a pipeline, this object needs to be specified separately.
+    pipeline = Optional, sklearn pipeline object. If the sklearn model was compiled using a pipeline, 
+                this object needs to be specified separately.
+    consistent_X = Optional Boolean. Input True to specify if the range of simulated feature ranges should be consistent.
+                        this makes the impact charts easier to compare between features where they have consistent 
+                        units of meaure (e.g. share of population).
     '''
     # Display the n most important features
     indices = np.argsort(model.feature_importances_)[::-1]
@@ -367,6 +396,9 @@ def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None):
     
     X_train = X_train.sample(sample_length, random_state=42)
     
+    if consistent_X:
+        value_dispersion = X_descriptor.loc['std',:].max()
+    
     for col in columns:
         base_pred = pipeline.predict(X_train)
         # Add percentiles of base predictions to a df for use in reporting
@@ -376,7 +408,8 @@ def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None):
         # copy X, resetting values to align to the base information through different iterations
         df_copy = X_train.copy() 
         
-        value_dispersion = X_descriptor.loc['std',col]
+        if consistent_X != True:
+            value_dispersion = X_descriptor.loc['std',col] * 1.5
 
         for val in np.arange(-value_dispersion, value_dispersion, value_dispersion/50):
             df_copy[col] = X_train[col] + val
@@ -448,25 +481,38 @@ def model_analyse_pred(X_test, y_test, model):
     
     INPUTS
     X_test - Pandas dataframe. The test set of characteristics to feed into a prediction model.
-    y_test - Pandas dataframe. The test set of responses to compare to predictions made in the model.
+    y_test - Pandas Series. The test set of responses to compare to predictions made in the model.
     model - SKLearn fitted supervised learning model.
     
     OUTPUTS
     A plot showing the relationship between prediction and actual sets.
     '''
     preds = model.predict(X_test)
-    lineStart = min(preds.min(), y_test.min())  
-    lineEnd = max(preds.max()*1.2, y_test.max()*1.2)
+    model_analyse(y_test, preds)
+
+def model_analyse(y_test, y_pred):
+    ''' 
+    A function for outputting a fitting chart, showing the pairing of prediction vs actual in a modelled test set.
+    
+    INPUTS
+    X_test - Pandas dataframe. The test set of characteristics to feed into a prediction model.
+    y_test - Pandas Series. The test set of responses to compare to predictions made in the model.
+    
+    OUTPUTS
+    A plot showing the relationship between prediction and actual sets.
+    '''
+    lineStart = min(y_pred.min(), y_test.min())  
+    lineEnd = max(y_pred.max()*1.2, y_test.max()*1.2)
 
     plt.figure()
-    plt.scatter(preds, y_test, color = 'k', alpha=0.5)
+    plt.scatter(y_pred, y_test, color = 'k', alpha=0.5)
     plt.gca().set_aspect('equal', adjustable='box')
     plt.plot([lineStart, lineEnd], [lineStart, lineEnd], 'k-', color = 'r')
     plt.xlim(lineStart, lineEnd)
     plt.ylim(lineStart, lineEnd)
     plt.xlabel('Predictions')
     plt.ylabel('Actuals')
-    plt.text(y_test.max()/5, y_test.max(), 'R2 Score: {:.3f}'.format(r2_score(preds, y_test)))
+    plt.text(y_test.max()/5, y_test.max()*1.1, 'R2 Score: {:.3f}'.format(r2_score(y_test, y_pred)))
     plt.show()
     
 def top_n_features(model, X_train, n_features):
