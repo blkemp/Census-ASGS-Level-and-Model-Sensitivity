@@ -362,7 +362,7 @@ def feature_plot_h(model, X_train, n_features):
     plt.show()  
 
     
-def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None, consistent_X=False):
+def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None, consistent_X=False, share_y = True):
     '''
     Takes a trained model and training dataset and synthesises the impacts of the top n features
     to show their relationship to the response vector (i.e. how a change in the feature changes
@@ -378,6 +378,12 @@ def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None, cons
     consistent_X = Optional Boolean. Input True to specify if the range of simulated feature ranges should be consistent.
                         this makes the impact charts easier to compare between features where they have consistent 
                         units of meaure (e.g. share of population).
+    share_y = Optional Boolean. Have a shared y-axis for all sub plots. Very good for comparing impacts of changes to 
+                individual features, but can make distinguishing the impacts of a feature difficult if there is 
+                significant variance in other plots.
+    
+    OUTPUT
+    Plot with n subplots showing the variance for min, max, median, 1Q and 3Q as a result of simulated outcomes.
     '''
     # Display the n most important features
     indices = np.argsort(model.feature_importances_)[::-1]
@@ -430,7 +436,7 @@ def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None, cons
     # Create a subplot object based on the number of features
     num_cols = 2
     subplot_rows = int(n_features/num_cols) + int(n_features%num_cols)
-    fig, axs = plt.subplots(nrows = subplot_rows, ncols = num_cols, sharey = True, figsize=(15,5*subplot_rows))
+    fig, axs = plt.subplots(nrows = subplot_rows, ncols = num_cols, sharey = share_y, figsize=(15,5*subplot_rows))
 
     nlines = 1
 
@@ -459,12 +465,12 @@ def feature_impact_plot(model, X_train, n_features, y_label, pipeline=None, cons
             axs[ax_row, ax_column].set_xlabel('Simulated +/- change to feature'.format(y_label))
             
             # Format the y-axis as %
-            if ax_column == 0:
+            if ax_column == 0 or share_y == False:
                 vals = axs[ax_row, ax_column].get_yticks()
                 axs[ax_row, ax_column].set_yticklabels(['{:,.2%}'.format(x) for x in vals])
                 axs[ax_row, ax_column].set_ylabel('% change to {}'.format(y_label))
         
-        # If there is a "spare" plot, hide the axis so it simply shows ans an empty space
+        # If there is a "spare" plot, hide the axis so it simply shows as an empty space
         else:
             axs[int(i/num_cols),int(i%num_cols)].axis('off')
     
